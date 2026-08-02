@@ -66,11 +66,14 @@
 #define SENS_IN_A 26
 #define SENS_IN_B 27
 
+// define length of transmit message buffer
+#define MSG_LEN 6 // bytes
+
 void init_all_hw(SX1262& radio);
 int pico_led_init(void);
 void pico_set_led(bool led_on);
 void sensors_init(void);
-float en_read_sensor(int sensor);
+uint16_t en_read_sensor(int sensor);
 
 #if I_AM_TRANSMITTER
 int main() {
@@ -85,17 +88,24 @@ int main() {
   en_read_sensor(SENS_IN_B);
 
   int state; // Store radio state
-  float res_sens_a;
-  float res_sens_b;
-
+  uint16_t res_sens_a;
+  uint16_t res_sens_b;
+  uint8_t msg[MSG_LEN] = {0};
   for(;;) {
     // read both sensor values
     res_sens_a = en_read_sensor(SENS_IN_A);
     res_sens_b = en_read_sensor(SENS_IN_B);
-    printf("Sensor A: %.2f ohms, Sensor B: %.2f ohms\n", res_sens_a, res_sens_b);
-    // send a packet
+    printf("Sensor A: %d ohms, Sensor B: %d ohms\n", res_sens_a, res_sens_b);
+    // build a packet
+    msg[0] = 0x47; // header
+    msg[1] = (res_sens_a & 0xF0) >> 8; // A MSB
+    msg[2] = (res_sens_a & 0x0F); // A LSB
+    msg[3] = (res_sens_b & 0xF0) >> 8; // B MSB
+    msg[4] = (res_sens_b & 0x0F); // B LSB
+    // TODO (8-bit battery voltage)
+    // TODO CRC-8
     printf("[SX1262] Transmitting packet ... ");
-    state = radio.transmit("Hello World!");
+    state = radio.transmit(msg, MSG_LEN);
     if(state == RADIOLIB_ERR_NONE) {
       // the packet was successfully transmitted
       printf("success!\n");
@@ -189,7 +199,7 @@ void sensors_init(void) {
 
 // Enable and read from the given sensor. Translates the ADC value from raw
 // to resistance (ohms).
-float en_read_sensor(int sensor){
+uint16_t en_read_sensor(int sensor){
   uint16_t value = 0;
   float voltage, resistance;
   if (sensor == SENS_IN_A){
@@ -209,10 +219,13 @@ float en_read_sensor(int sensor){
   voltage = (value*ADC_VREF)/(pow(2, ADC_RES)-1);
   printf("Voltage: %.2f\n", voltage);
   resistance = ((1e3*(1+SENSOR_BETA)*(2.6-voltage))/voltage)-100e3;
+  // Clamp resistance value within uint16_t range
   if (resistance < 0){
     resistance = 0;
+  } else if (resistance > pow(2, 16) - 1){
+    resistance = pow(2, 16) - 1;
   }
-  return resistance;
+  return static_cast<uint16_t>(resistance);
 }
 
 // Main hardware initialisation function
