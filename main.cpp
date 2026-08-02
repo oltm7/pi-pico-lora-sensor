@@ -1,13 +1,28 @@
 #include <pico/stdlib.h>
-#include <stdint.h>
+#include <cstdint>
+#include <cmath>
+#include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
+#include "hardware/adc.h"
 
 #include <RadioLib.h>
 #include <hal/RPiPico/PicoHal.h>
 
 // Controls whether the Pico only receives (false) or only transmits (true)
 #define I_AM_TRANSMITTER true
+
+// Soil moisture sensor voltage settle time (on time per read)
+#define SENSOR_TIME 2000 // ms
+
+// Soil moisture sensor transistor beta
+#define SENSOR_BETA 222 // ratio between I_C and I_B
+
+// ADC reference voltage
+#define ADC_VREF 3.3 // V
+
+// ADC bits
+#define ADC_RES 12 // bits
 
 // Transmission behaviour settings
 #define INITIAL_DELAY 500 // ms
@@ -45,9 +60,17 @@
 #define RFM_DIO1 15
 #define SX126X_DIO2_AS_RF_SWITCH
 
+// define sensor IO pins
+#define EN_SENS_A 18 
+#define EN_SENS_B 19
+#define SENS_IN_A 26
+#define SENS_IN_B 27
+
 void init_all_hw(SX1262& radio);
 int pico_led_init(void);
 void pico_set_led(bool led_on);
+void sensors_init(void);
+float en_read_sensor(int sensor);
 
 #if I_AM_TRANSMITTER
 int main() {
@@ -57,10 +80,19 @@ int main() {
 
   sleep_ms(INITIAL_DELAY);
   init_all_hw(radio);
+  // Flash lights to display functionality
+  en_read_sensor(SENS_IN_A);
+  en_read_sensor(SENS_IN_B);
 
   int state; // Store radio state
+  float res_sens_a;
+  float res_sens_b;
 
   for(;;) {
+    // read both sensor values
+    res_sens_a = en_read_sensor(SENS_IN_A);
+    res_sens_b = en_read_sensor(SENS_IN_B);
+    printf("Sensor A: %.2f ohms, Sensor B: %.2f ohms\n", res_sens_a, res_sens_b);
     // send a packet
     printf("[SX1262] Transmitting packet ... ");
     state = radio.transmit("Hello World!");
@@ -138,10 +170,58 @@ void pico_set_led(bool led_on) {
 #endif
 }
 
+// Soil moisture sensors (A and B) input and output pin initialisation.
+void sensors_init(void) {
+  // Initialise sensor enable lines A and B
+  gpio_init(EN_SENS_A);
+  gpio_set_dir(EN_SENS_A, GPIO_OUT);
+  gpio_put(EN_SENS_A, 0);
+
+  gpio_init(EN_SENS_B);
+  gpio_set_dir(EN_SENS_B, GPIO_OUT);
+  gpio_put(EN_SENS_B, 0);
+  
+  // Initialise ADC inputs
+  adc_init();
+  adc_gpio_init(SENS_IN_A);
+  adc_gpio_init(SENS_IN_B);
+}
+
+// Enable and read from the given sensor. Translates the ADC value from raw
+// to resistance (ohms).
+float en_read_sensor(int sensor){
+  uint16_t value = 0;
+  float voltage, resistance;
+  if (sensor == SENS_IN_A){
+    gpio_put(EN_SENS_A, 1); // Enable sensor
+    sleep_ms(SENSOR_TIME); // Allow voltage to settle
+    adc_select_input(0);
+    value = adc_read();
+    gpio_put(EN_SENS_A, 0); // Disable sensor
+  } else if (sensor == SENS_IN_B){
+    gpio_put(EN_SENS_B, 1); // Enable sensor
+    sleep_ms(SENSOR_TIME); // Allow voltage to settle
+    adc_select_input(1);
+    value = adc_read();
+    gpio_put(EN_SENS_B, 0); // Disable sensor
+  }
+  // Convert value to resistance (ohms)
+  voltage = (value*ADC_VREF)/(pow(2, ADC_RES)-1);
+  printf("Voltage: %.2f\n", voltage);
+  resistance = ((1e3*(1+SENSOR_BETA)*(2.6-voltage))/voltage)-100e3;
+  if (resistance < 0){
+    resistance = 0;
+  }
+  return resistance;
+}
+
 // Main hardware initialisation function
 void init_all_hw(SX1262& radio) {
   // Initialise LED
   pico_led_init();
+
+  // Initialise soil moisture sensor IOs
+  sensors_init();
 
   // Initialise SPI0 port
   spi_init(spi0, 2 * 1000 * 1000); // SPI speed
@@ -160,38 +240,35 @@ void init_all_hw(SX1262& radio) {
   gpio_init(RFM_DIO1);
   gpio_set_dir(RFM_DIO1, GPIO_IN);
 
-printf("[SX1262] Initializing ... ");
+  printf("[SX1262] Initializing ... ");
 
-pico_set_led(true);
-sleep_ms(500);
-pico_set_led(false);
+  pico_set_led(true);
+  sleep_ms(500);
+  pico_set_led(false);
 
-// Faster SPI
-spi_set_baudrate(spi0, 1000 * 1000);
+  // Reset radio
+  gpio_init(RFM_RST);
+  gpio_set_dir(RFM_RST, GPIO_OUT);
 
-// Reset radio
-gpio_init(RFM_RST);
-gpio_set_dir(RFM_RST, GPIO_OUT);
+  gpio_put(RFM_RST, 0);
+  sleep_ms(20);
+  gpio_put(RFM_RST, 1);
+  sleep_ms(50);
 
-gpio_put(RFM_RST, 0);
-sleep_ms(20);
-gpio_put(RFM_RST, 1);
-sleep_ms(50);
-
-// Wait for BUSY
-uint32_t timeout = 500;
-while(gpio_get(RFM_BUSY) && timeout--) {
+  // Wait for BUSY
+  uint32_t timeout = 500;
+  while(gpio_get(RFM_BUSY) && timeout--) {
     sleep_ms(1);
-}
+  }
 
-printf("BUSY=%d DIO1=%d\n",
-       gpio_get(RFM_BUSY),
-       gpio_get(RFM_DIO1));
+  printf("BUSY=%d DIO1=%d\n",
+        gpio_get(RFM_BUSY),
+        gpio_get(RFM_DIO1));
 
-int state;
-int attempts = 0;
+  int state;
+  int attempts = 0;
 
-do {
+  do {
 
     state = radio.begin(
         C_FREQ_MHZ,
@@ -222,11 +299,9 @@ do {
 
     attempts++;
 
-} while(state != RADIOLIB_ERR_NONE);
+  } while(state != RADIOLIB_ERR_NONE);
 
-printf("Radio init success!\n");
-
-radio.setDio2AsRfSwitch(true);
+  printf("Radio init success!\n");
   // == Possibly not needed because of processor directive == 
   // Set DIO2 as RF Switch (internal control of the RF Switch)
   radio.setDio2AsRfSwitch(true);

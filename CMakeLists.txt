@@ -52,6 +52,7 @@ target_link_libraries(${PROJECT_NAME}
     pico_stdlib
     hardware_spi
     hardware_gpio
+    hardware_adc
     hardware_timer
     pico_multicore
     hardware_pwm
