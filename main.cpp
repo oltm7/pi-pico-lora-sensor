@@ -10,13 +10,13 @@
 #include <hal/RPiPico/PicoHal.h>
 
 // Controls whether the Pico only receives (false) or only transmits (true)
-#define I_AM_TRANSMITTER true
+#define I_AM_TRANSMITTER false
 
 // Soil moisture sensor voltage settle time (on time per read)
 #define SENSOR_TIME 2000 // ms
 
 // Soil moisture sensor transistor beta
-#define SENSOR_BETA 222 // ratio between I_C and I_B
+#define SENSOR_BETA 230 // ratio between I_C and I_B
 
 // ADC reference voltage
 #define ADC_VREF 3.3 // V
@@ -39,8 +39,8 @@
 #define LORA_SF 7
   // coding rate:                 5
 #define LORA_CR 5
-  // sync word:                   0x34 (public network/LoRaWAN)
-#define LORA_SYNC_WORD 0x34
+  // sync word:                   e.g. 0x34 (public network/LoRaWAN)
+#define LORA_SYNC_WORD 0x08
   // output power:                -5 dBm
 #define TX_POWER_DBM -5 // dBm
   // preamble length:             8 symbols
@@ -93,15 +93,17 @@ int main() {
   uint8_t msg[MSG_LEN] = {0};
   for(;;) {
     // read both sensor values
+    // TODO: Perform e.g. 3 reads per sensor and send average values. Maybe should shorten sensor read time...
     res_sens_a = en_read_sensor(SENS_IN_A);
     res_sens_b = en_read_sensor(SENS_IN_B);
     printf("Sensor A: %d ohms, Sensor B: %d ohms\n", res_sens_a, res_sens_b);
     // build a packet
     msg[0] = 0x47; // header
-    msg[1] = (res_sens_a & 0xF0) >> 8; // A MSB
-    msg[2] = (res_sens_a & 0x0F); // A LSB
-    msg[3] = (res_sens_b & 0xF0) >> 8; // B MSB
-    msg[4] = (res_sens_b & 0x0F); // B LSB
+    // TODO Message length
+    msg[1] = (res_sens_a & 0xFF00) >> 8; // A MSB
+    msg[2] = (res_sens_a & 0x00FF); // A LSB
+    msg[3] = (res_sens_b & 0xFF00) >> 8; // B MSB
+    msg[4] = (res_sens_b & 0x00FF); // B LSB
     // TODO (8-bit battery voltage)
     // TODO CRC-8
     printf("[SX1262] Transmitting packet ... ");
@@ -143,11 +145,22 @@ int main() {
     status = radio.receive(rx_buf, NUM_BYTES, RX_TIMEOUT);
     if(status == RADIOLIB_ERR_NONE) {
       // the packet was successfully received
-      printf("Received data: %s\n", rx_buf);
+      printf("Received data: ");
+      for (int i = 0; i < MSG_LEN; i++) {
+        printf("%02X ", rx_buf[i]);
+      }
+      printf("\n");
       pico_set_led(true);
       sleep_ms(LED_DELAY_MS);
       pico_set_led(false);
-    } else {
+      if (rx_buf[0] != 0x47) {
+        printf("Bad header!\n");
+      } else {
+        uint16_t sens_a = (rx_buf[1] << 8) | rx_buf[2];
+        uint16_t sens_b = (rx_buf[3] << 8) | rx_buf[4];
+        printf("Sensor A: %u kiloohms, Sensor B: %u kiloohms\n", sens_a, sens_b);
+      }
+    } else if (status != RADIOLIB_ERR_RX_TIMEOUT) {
       printf("Failure to Receive, Code: %d\n", status);
     }
   }
@@ -198,7 +211,7 @@ void sensors_init(void) {
 }
 
 // Enable and read from the given sensor. Translates the ADC value from raw
-// to resistance (ohms).
+// to resistance (kilo-ohms).
 uint16_t en_read_sensor(int sensor){
   uint16_t value = 0;
   float voltage, resistance;
@@ -219,6 +232,7 @@ uint16_t en_read_sensor(int sensor){
   voltage = (value*ADC_VREF)/(pow(2, ADC_RES)-1);
   printf("Voltage: %.2f\n", voltage);
   resistance = ((1e3*(1+SENSOR_BETA)*(2.6-voltage))/voltage)-100e3;
+  resistance = resistance / 1e3; // Return resistance in kilo-ohms
   // Clamp resistance value within uint16_t range
   if (resistance < 0){
     resistance = 0;
