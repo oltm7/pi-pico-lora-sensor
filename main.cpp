@@ -13,7 +13,7 @@
 #define I_AM_TRANSMITTER false
 
 // Soil moisture sensor voltage settle time (on time per read)
-#define SENSOR_TIME 2000 // ms
+#define SENSOR_TIME 500 // ms
 
 // Soil moisture sensor transistor beta
 #define SENSOR_BETA 230 // ratio between I_C and I_B
@@ -67,13 +67,15 @@
 #define SENS_IN_B 27
 
 // define length of transmit message buffer
-#define MSG_LEN 6 // bytes
+#define MSG_LEN 7 // bytes
 
 void init_all_hw(SX1262& radio);
 int pico_led_init(void);
 void pico_set_led(bool led_on);
 void sensors_init(void);
 uint16_t en_read_sensor(int sensor);
+uint8_t v_bat_read(void);
+uint8_t temp_read(void);
 
 #if I_AM_TRANSMITTER
 int main() {
@@ -88,15 +90,18 @@ int main() {
   en_read_sensor(SENS_IN_B);
 
   int state; // Store radio state
-  uint16_t res_sens_a;
-  uint16_t res_sens_b;
+  uint16_t res_sens_a, res_sens_b;
+  uint8_t v_bat, temp;
   uint8_t msg[MSG_LEN] = {0};
   for(;;) {
     // read both sensor values
     // TODO: Perform e.g. 3 reads per sensor and send average values. Maybe should shorten sensor read time...
     res_sens_a = en_read_sensor(SENS_IN_A);
     res_sens_b = en_read_sensor(SENS_IN_B);
-    printf("Sensor A: %d ohms, Sensor B: %d ohms\n", res_sens_a, res_sens_b);
+    v_bat = v_bat_read();
+    temp = temp_read();
+    printf("Sensor A: %d ohms, Sensor B: %d ohms, V_BAT: %d, TEMP: %d deg C \n", 
+      res_sens_a, res_sens_b, v_bat, temp);
     // build a packet
     msg[0] = 0x47; // header
     // TODO Message length
@@ -104,7 +109,9 @@ int main() {
     msg[2] = (res_sens_a & 0x00FF); // A LSB
     msg[3] = (res_sens_b & 0xFF00) >> 8; // B MSB
     msg[4] = (res_sens_b & 0x00FF); // B LSB
-    // TODO (8-bit battery voltage)
+    msg[5] = (v_bat); // 8-bit battery voltage w.r.t 3.3V
+    msg[6] = (temp); // Temperature in degrees celsius
+
     // TODO CRC-8
     printf("[SX1262] Transmitting packet ... ");
     state = radio.transmit(msg, MSG_LEN);
@@ -240,6 +247,31 @@ uint16_t en_read_sensor(int sensor){
     resistance = pow(2, 16) - 1;
   }
   return static_cast<uint16_t>(resistance);
+}
+
+// Returns battery voltage value as an 8-bit value relative to 3.3V.
+// We do three reads and average them first for a better result.
+uint8_t v_bat_read(void){
+  int n = 3; // Number of sample points
+  uint16_t raw_sum = 0;
+  for (int i = 0; i < n; i++){
+    adc_select_input(2);
+    raw_sum += adc_read(); // Note, the raw value will be half the true voltage
+    sleep_ms(30);
+  }
+  float raw_avg = raw_sum / n;
+  uint8_t value = ((2 * raw_avg) / pow(2, 12)) * pow(2, 8); 
+  return value;
+}
+
+// Return MCU temperature as 8-bit value in degrees Celsius.
+uint8_t temp_read(void){
+  adc_select_input(4);
+  uint16_t raw = adc_read();
+  float voltage = (3.3 / 4096) * raw;
+  float temp = 27 - (voltage - 0.706) / 0.001721;
+  uint8_t temp_short = lroundf(temp);
+  return temp_short;
 }
 
 // Main hardware initialisation function
