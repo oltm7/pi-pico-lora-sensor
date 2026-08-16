@@ -13,7 +13,7 @@
 #define I_AM_TRANSMITTER true
 
 // Time between sensor reads (minutes)
-#define SAMPLE_PERIOD 30
+#define SAMPLE_PERIOD 1
 
 // Soil moisture sensor voltage settle time (on time per read)
 #define SENSOR_TIME 500 // ms
@@ -71,8 +71,14 @@
 #define SENS_IN_B 27
 #define VBAT_BUF 28
 
+// define cell status input pins
+#define CELL_PPR 7
+#define CELL_CHG 8
+#define CELL_OC 17
+#define CELL_OD 16
+
 // define length of transmit message buffer
-#define MSG_LEN 7 // bytes
+#define MSG_LEN 8 // bytes
 
 void init_all_hw(SX1262& radio);
 int pico_led_init(void);
@@ -83,6 +89,7 @@ uint8_t v_bat_read(void);
 uint8_t temp_read(void);
 uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms);
 void sleep_minutes(int n);
+uint8_t cell_get_status(void);
 
 #if I_AM_TRANSMITTER
 int main() {
@@ -98,7 +105,7 @@ int main() {
 
   int state; // Store radio state
   uint16_t res_sens_a, res_sens_b;
-  uint8_t v_bat, temp;
+  uint8_t v_bat, temp, status;
   uint8_t msg[MSG_LEN] = {0};
   for(;;) {
     // read both sensor values
@@ -107,6 +114,7 @@ int main() {
     res_sens_b = en_read_sensor(SENS_IN_B);
     v_bat = v_bat_read();
     temp = temp_read();
+    status = cell_get_status();
     printf("Sensor A: %d ohms, Sensor B: %d ohms, V_BAT: %d, TEMP: %d deg C \n", 
       res_sens_a, res_sens_b, v_bat, temp);
     // build a packet
@@ -116,9 +124,9 @@ int main() {
     msg[2] = (res_sens_a & 0x00FF); // A LSB
     msg[3] = (res_sens_b & 0xFF00) >> 8; // B MSB
     msg[4] = (res_sens_b & 0x00FF); // B LSB
-    msg[5] = (v_bat); // 8-bit battery voltage w.r.t 3.3V
-    msg[6] = (temp); // Temperature in degrees celsius
-
+    msg[5] = v_bat; // 8-bit battery voltage w.r.t 3.3V
+    msg[6] = temp; // Temperature in degrees celsius
+    msg[7] = status; // Cell monitor status bits: [MSB->LSB] PPR, CHG, OD, OC
     // TODO CRC-8
     printf("[SX1262] Transmitting packet ... ");
     state = radio.transmit(msg, MSG_LEN);
@@ -172,6 +180,9 @@ int main() {
       } else {
         uint16_t sens_a = (rx_buf[1] << 8) | rx_buf[2];
         uint16_t sens_b = (rx_buf[3] << 8) | rx_buf[4];
+        uint8_t v_bat = rx_buf[5];
+        uint8_t temp = rx_buf[6];
+        uint8_t status = rx_buf[7];
         printf("Sensor A: %u kiloohms, Sensor B: %u kiloohms\n", sens_a, sens_b);
       }
     } else if (status != RADIOLIB_ERR_RX_TIMEOUT) {
@@ -218,12 +229,37 @@ void sensors_init(void) {
   gpio_set_dir(EN_SENS_B, GPIO_OUT);
   gpio_put(EN_SENS_B, 0);
   
+  // Initialise cell status pins (OC/OD are CMOS push-pull so no pullups)
+  gpio_init(CELL_PPR);
+  gpio_pull_up(CELL_PPR);
+  gpio_set_dir(CELL_PPR, GPIO_IN);
+
+  gpio_init(CELL_CHG);
+  gpio_pull_up(CELL_CHG);
+  gpio_set_dir(CELL_CHG, GPIO_IN);
+
+  gpio_init(CELL_OC);
+  gpio_set_dir(CELL_OC, GPIO_IN);
+
+  gpio_init(CELL_OD);
+  gpio_set_dir(CELL_OD, GPIO_IN);
+
   // Initialise ADC inputs
   adc_init();
   adc_gpio_init(SENS_IN_A);
   adc_gpio_init(SENS_IN_B);
   adc_gpio_init(VBAT_BUF);
   adc_set_temp_sensor_enabled(true);
+}
+
+// Reads status bits from the cell management system to monitor PPR (power present),
+// CHG (charging), OC (overcharged), and OD (overdischarged).
+// returns: [MSB->LSB] PPR, CHG, OD, OC, 0, 0, 0, 0
+uint8_t cell_get_status(void){
+  uint8_t status = 0;
+  status = (gpio_get(CELL_PPR) >> 7) | (gpio_get(CELL_CHG) >> 6) | 
+            (gpio_get(CELL_OD) >> 5) | (gpio_get(CELL_OD) >> 4);
+  return status;
 }
 
 uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms){
