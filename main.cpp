@@ -12,6 +12,9 @@
 // Controls whether the Pico only receives (false) or only transmits (true)
 #define I_AM_TRANSMITTER false
 
+// Time between sensor reads (minutes)
+#define SAMPLE_PERIOD 30
+
 // Soil moisture sensor voltage settle time (on time per read)
 #define SENSOR_TIME 500 // ms
 // Soil moisture sensor transistor beta
@@ -78,6 +81,7 @@ uint16_t en_read_sensor(int sensor);
 uint8_t v_bat_read(void);
 uint8_t temp_read(void);
 uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms);
+void sleep_minutes(int n);
 
 #if I_AM_TRANSMITTER
 int main() {
@@ -124,8 +128,8 @@ int main() {
       sleep_ms(LED_DELAY_MS);
       pico_set_led(false);
 
-      // wait for a half second before transmitting again
-      hal->delay(500);
+      // wait for a time before transmitting again
+      sleep_minutes(SAMPLE_PERIOD);
 
     } else {
       printf("failed, code %d\n", state);
@@ -239,12 +243,12 @@ uint16_t en_read_sensor(int sensor){
   if (sensor == SENS_IN_A){
     gpio_put(EN_SENS_A, 1); // Enable sensor
     sleep_ms(SENSOR_TIME); // Allow voltage to settle
-    value = multi_sample(0, 3, 100);
+    value = multi_sample(0, 3, SENSOR_TIME);
     gpio_put(EN_SENS_A, 0); // Disable sensor
   } else if (sensor == SENS_IN_B){
     gpio_put(EN_SENS_B, 1); // Enable sensor
     sleep_ms(SENSOR_TIME); // Allow voltage to settle
-    value = multi_sample(1, 3, 100);
+    value = multi_sample(1, 3, SENSOR_TIME);
     gpio_put(EN_SENS_B, 0); // Disable sensor
   }
   // Convert value to resistance (ohms)
@@ -277,6 +281,14 @@ uint8_t temp_read(void){
   float temp = 27 - (voltage - 0.706) / 0.001721;
   uint8_t temp_short = lroundf(temp);
   return temp_short;
+}
+
+// Naive "sleep" command, doesn't actually lower power draw at all, however
+// 25mA is manageable (if wasteful) on a >1500mAh system with solar.
+void sleep_minutes(int n) {
+    for (int i = 0; i < n; i++) {
+        sleep_ms(60000); // 1 minute per chunk
+    }
 }
 
 // Main hardware initialisation function
