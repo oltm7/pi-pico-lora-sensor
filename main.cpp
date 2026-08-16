@@ -14,9 +14,10 @@
 
 // Soil moisture sensor voltage settle time (on time per read)
 #define SENSOR_TIME 500 // ms
-
 // Soil moisture sensor transistor beta
 #define SENSOR_BETA 230 // ratio between I_C and I_B
+// Soil moisture number of repeat reads for averaging
+#define SENSOR_REPEAT 3
 
 // ADC reference voltage
 #define ADC_VREF 3.3 // V
@@ -76,6 +77,7 @@ void sensors_init(void);
 uint16_t en_read_sensor(int sensor);
 uint8_t v_bat_read(void);
 uint8_t temp_read(void);
+uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms);
 
 #if I_AM_TRANSMITTER
 int main() {
@@ -217,6 +219,18 @@ void sensors_init(void) {
   adc_gpio_init(SENS_IN_B);
 }
 
+uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms){
+  uint16_t raw_sum = 0;
+  for (int i = 0; i < n; i++){
+    adc_select_input(n_adc);
+    raw_sum += adc_read(); // Note, the raw value will be half the true voltage
+    sleep_ms(rest_ms);
+  }
+  float raw_avg = raw_sum / n;
+  uint16_t avg = lroundf(raw_avg);
+  return avg;
+}
+
 // Enable and read from the given sensor. Translates the ADC value from raw
 // to resistance (kilo-ohms).
 uint16_t en_read_sensor(int sensor){
@@ -225,14 +239,12 @@ uint16_t en_read_sensor(int sensor){
   if (sensor == SENS_IN_A){
     gpio_put(EN_SENS_A, 1); // Enable sensor
     sleep_ms(SENSOR_TIME); // Allow voltage to settle
-    adc_select_input(0);
-    value = adc_read();
+    value = multi_sample(0, 3, 100);
     gpio_put(EN_SENS_A, 0); // Disable sensor
   } else if (sensor == SENS_IN_B){
     gpio_put(EN_SENS_B, 1); // Enable sensor
     sleep_ms(SENSOR_TIME); // Allow voltage to settle
-    adc_select_input(1);
-    value = adc_read();
+    value = multi_sample(1, 3, 100);
     gpio_put(EN_SENS_B, 0); // Disable sensor
   }
   // Convert value to resistance (ohms)
@@ -253,21 +265,14 @@ uint16_t en_read_sensor(int sensor){
 // We do three reads and average them first for a better result.
 uint8_t v_bat_read(void){
   int n = 3; // Number of sample points
-  uint16_t raw_sum = 0;
-  for (int i = 0; i < n; i++){
-    adc_select_input(2);
-    raw_sum += adc_read(); // Note, the raw value will be half the true voltage
-    sleep_ms(30);
-  }
-  float raw_avg = raw_sum / n;
-  uint8_t value = ((2 * raw_avg) / pow(2, 12)) * pow(2, 8); 
+  uint16_t avg = multi_sample(2, n, 30);
+  uint8_t value = ((2 * avg) / pow(2, 12)) * pow(2, 8); 
   return value;
 }
 
 // Return MCU temperature as 8-bit value in degrees Celsius.
 uint8_t temp_read(void){
-  adc_select_input(4);
-  uint16_t raw = adc_read();
+  uint16_t raw = multi_sample(4, 3, 30);
   float voltage = (3.3 / 4096) * raw;
   float temp = 27 - (voltage - 0.706) / 0.001721;
   uint8_t temp_short = lroundf(temp);
