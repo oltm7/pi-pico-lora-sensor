@@ -10,7 +10,7 @@
 #include <hal/RPiPico/PicoHal.h>
 
 // Controls whether the Pico only receives (false) or only transmits (true)
-#define I_AM_TRANSMITTER false
+#define I_AM_TRANSMITTER true
 
 // Time between sensor reads (minutes)
 #define SAMPLE_PERIOD 30
@@ -69,6 +69,7 @@
 #define EN_SENS_B 19
 #define SENS_IN_A 26
 #define SENS_IN_B 27
+#define VBAT_BUF 28
 
 // define length of transmit message buffer
 #define MSG_LEN 7 // bytes
@@ -221,16 +222,18 @@ void sensors_init(void) {
   adc_init();
   adc_gpio_init(SENS_IN_A);
   adc_gpio_init(SENS_IN_B);
+  adc_gpio_init(VBAT_BUF);
+  adc_set_temp_sensor_enabled(true);
 }
 
 uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms){
   uint16_t raw_sum = 0;
   for (int i = 0; i < n; i++){
     adc_select_input(n_adc);
-    raw_sum += adc_read(); // Note, the raw value will be half the true voltage
+    raw_sum += adc_read();
     sleep_ms(rest_ms);
   }
-  float raw_avg = raw_sum / n;
+  float raw_avg = (float)raw_sum / (float)n;
   uint16_t avg = lroundf(raw_avg);
   return avg;
 }
@@ -270,15 +273,16 @@ uint16_t en_read_sensor(int sensor){
 uint8_t v_bat_read(void){
   int n = 3; // Number of sample points
   uint16_t avg = multi_sample(2, n, 30);
-  uint8_t value = ((2 * avg) / pow(2, 12)) * pow(2, 8); 
+  uint8_t value = ((2 * avg) / pow(2, 12)) * pow(2, 8); // avg x2 because of voltage divider
   return value;
 }
 
 // Return MCU temperature as 8-bit value in degrees Celsius.
 uint8_t temp_read(void){
-  uint16_t raw = multi_sample(4, 3, 30);
-  float voltage = (3.3 / 4096) * raw;
-  float temp = 27 - (voltage - 0.706) / 0.001721;
+  uint16_t raw = multi_sample(4, 3, 100);
+  float voltage = (3.3 / pow(2, 12)) * raw;
+  printf("Raw: %d, Voltage: %f\n", raw, voltage);
+  float temp = 27.0f - (voltage - 0.706f) / 0.001721f;
   uint8_t temp_short = lroundf(temp);
   return temp_short;
 }
