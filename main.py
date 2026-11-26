@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import sys
 import serial
 import serial.tools.list_ports
+import matplotlib.dates as mdates
 from datetime import datetime
 import numpy as np
 
@@ -32,11 +33,14 @@ def monitor_serial(port, graphs, baudrate=115200):
                 if ser.in_waiting > 0:
                     # Read line, decode bytes to string, and strip trailing newlines
                     line = ser.readline().decode('utf-8', errors='replace').rstrip()
+                    print(line)
                     if (line[0:5] == "RSSI,"):
                         data_line = ser.readline().decode('utf-8', errors='replace').rstrip()
+                        print(data_line)
                         data = parse_packet(data_line)
                         update_graphs(data, graphs)
-                    print(line)
+                else:
+                    plt.pause(0.01)
     except serial.SerialException as e:
         print(f"\nSerial error: {e}")
     except KeyboardInterrupt:
