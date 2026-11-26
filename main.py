@@ -55,7 +55,7 @@ def parse_packet(line):
     data["SNR"] = float(line_items[1])
     data["VBAT"] = float(line_items[2])
     data["TEMP"] = int(line_items[3])
-    data["CHG"] = int(bool(int(line_items[4], 16) & 0x40))
+    data["CHG"] = 1 - int(bool(int(line_items[4], 16) & 0x40)) # 1 = charging, 0 = not charging
     data["SENSA"] = float(line_items[5])
     data["SENSB"] = float(line_items[6])
     return data
@@ -148,7 +148,7 @@ def init_graphs():
     ax_flat[6].xaxis.set_major_formatter(date_format)
     # Auto-rotate labels so they do not overlap
     fig.autofmt_xdate()
-    ax_flat[6].set_ylabel("Charging Status (Y/N)")
+    ax_flat[6].set_ylabel("Charging Status (Y=1/N=0)")
     ax_flat[6].set_title("Solar Charging Status")
 
     # Extra plot (disabled)
