@@ -11,11 +11,11 @@
 #include <hal/RPiPico/PicoHal.h>
 
 // Controls whether the Pico only receives (false) or only transmits (true)
-#define I_AM_TRANSMITTER false
+#define I_AM_TRANSMITTER true
 
 // Time between sensor reads (minutes). 0 = send continuously (debugging only).
 // Set back to 5 for deployment.
-#define SAMPLE_PERIOD 5
+#define SAMPLE_PERIOD 1
 
 // Soil moisture sensor voltage settle time (on time per read)
 #define SENSOR_TIME 500 // ms
@@ -49,7 +49,7 @@
   // sync word:                   e.g. 0x34 (public network/LoRaWAN)
 #define LORA_SYNC_WORD 0x34
   // output power:                -5 dBm
-#define TX_POWER_DBM 10 // dBm
+#define TX_POWER_DBM 16 // dBm
   // preamble length:             8 symbols
 #define LORA_PREAMBLE_LENGTH 8 // symbols
 #define TCXO_VOLTAGE 1.8
@@ -200,7 +200,7 @@ int main() {
         printf("cell voltage: %.2f V, temp: %d C, status: 0x%02X, Sensor A: %u kohm, Sensor B: %u kohm\n",
                (double)v_bat_voltage, temp, cell_status, sens_a, sens_b);
         printf("RSSI,SNR,VBAT,TEMP,STATUS,SENSA,SENSB\n");
-        printf("%.1f,%.1f,%.1f,%d,%02X,%u,%u\n", 
+        printf("%.1f,%.1f,%.2f,%d,%02X,%u,%u\n", 
           radio_rssi,radio_snr,(double)v_bat_voltage, temp, cell_status, sens_a, sens_b);
       }
     } else if (st == RADIOLIB_ERR_RX_TIMEOUT) {
