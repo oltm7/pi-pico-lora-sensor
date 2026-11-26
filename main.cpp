@@ -1,5 +1,6 @@
 #include <pico/stdlib.h>
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
@@ -12,8 +13,9 @@
 // Controls whether the Pico only receives (false) or only transmits (true)
 #define I_AM_TRANSMITTER true
 
-// Time between sensor reads (minutes)
-#define SAMPLE_PERIOD 1
+// Time between sensor reads (minutes). 0 = send continuously (debugging only).
+// Set back to 5 for deployment.
+#define SAMPLE_PERIOD 5
 
 // Soil moisture sensor voltage settle time (on time per read)
 #define SENSOR_TIME 500 // ms
@@ -23,13 +25,14 @@
 #define SENSOR_REPEAT 3
 
 // ADC reference voltage
-#define ADC_VREF 3.3 // V
+#define ADC_VREF 3.3f // V
+#define VBAT_MAX_V     5.0f //V  // value that maps to 255 (cell status)
 
 // ADC bits
 #define ADC_RES 12 // bits
 
 // Transmission behaviour settings
-#define INITIAL_DELAY 500 // ms
+#define INITIAL_DELAY 2000 // ms
 #define LED_DELAY_MS 100
 #define NUM_BYTES 255
 #define RX_TIMEOUT 0 // ms
@@ -44,12 +47,12 @@
   // coding rate:                 5
 #define LORA_CR 5
   // sync word:                   e.g. 0x34 (public network/LoRaWAN)
-#define LORA_SYNC_WORD 0x08
+#define LORA_SYNC_WORD 0x34
   // output power:                -5 dBm
 #define TX_POWER_DBM -5 // dBm
   // preamble length:             8 symbols
 #define LORA_PREAMBLE_LENGTH 8 // symbols
-#define TCXO_VOLTAGE 3.1 // UNUSED, just running on default voltage
+#define TCXO_VOLTAGE 1.8
 // ===========================================
 
 // define pins to be used for interfacing with the SX1262
@@ -90,9 +93,11 @@ uint8_t temp_read(void);
 uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms);
 void sleep_minutes(int n);
 uint8_t cell_get_status(void);
+void printIrqStatus(SX1262& radio);
 
 #if I_AM_TRANSMITTER
 int main() {
+  stdio_init_all();
   // create a new instance of the HAL class
   PicoHal* hal = new PicoHal(SPI_PORT, SPI_MISO, SPI_MOSI, SPI_SCK);
   SX1262 radio = new Module(hal, RFM_NSS, RFM_DIO1, RFM_RST, RFM_BUSY);
@@ -109,14 +114,13 @@ int main() {
   uint8_t msg[MSG_LEN] = {0};
   for(;;) {
     // read both sensor values
-    // TODO: Perform e.g. 3 reads per sensor and send average values. Maybe should shorten sensor read time...
     res_sens_a = en_read_sensor(SENS_IN_A);
     res_sens_b = en_read_sensor(SENS_IN_B);
     v_bat = v_bat_read();
     temp = temp_read();
     status = cell_get_status();
-    printf("Sensor A: %d ohms, Sensor B: %d ohms, V_BAT: %d, TEMP: %d deg C \n", 
-      res_sens_a, res_sens_b, v_bat, temp);
+    printf("Sensor A: %d kohm, Sensor B: %d kohm, V_BAT: %d, TEMP: %d deg C, Cell Status: %d \n", 
+      res_sens_a, res_sens_b, v_bat, temp, status);
     // build a packet
     msg[0] = 0x47; // header
     // TODO Message length
@@ -124,7 +128,7 @@ int main() {
     msg[2] = (res_sens_a & 0x00FF); // A LSB
     msg[3] = (res_sens_b & 0xFF00) >> 8; // B MSB
     msg[4] = (res_sens_b & 0x00FF); // B LSB
-    msg[5] = v_bat; // 8-bit battery voltage w.r.t 3.3V
+    msg[5] = v_bat; // 8-bit battery voltage from 0V to 5V (0-255)
     msg[6] = temp; // Temperature in degrees celsius
     msg[7] = status; // Cell monitor status bits: [MSB->LSB] PPR, CHG, OD, OC
     // TODO CRC-8
@@ -149,24 +153,31 @@ int main() {
 }
 #else
 int main() {
+  stdio_init_all();
   // create a new instance of the HAL class
   PicoHal* hal = new PicoHal(SPI_PORT, SPI_MISO, SPI_MOSI, SPI_SCK);
   SX1262 radio = new Module(hal, RFM_NSS, RFM_DIO1, RFM_RST, RFM_BUSY);
 
   sleep_ms(INITIAL_DELAY);
 
-  int16_t status;
   uint8_t rx_buf[NUM_BYTES];
 
-  init_all_hw(radio);
-  printf("[SX1262] Listening for data ... ");
+  printf("Connecting to SX1262 ...");
 
-  for(;;) {
+  init_all_hw(radio);
+
+  printf("[SX1262] Listening for data ... \n");
+
+  uint32_t n_ok = 0, n_to = 0, n_err = 0, t_rep = 0;
+  for (;;) {
     // attempt to receive a packet
     memset(rx_buf, 0, NUM_BYTES);  // Zero-initialise buffer
-    status = radio.receive(rx_buf, NUM_BYTES, RX_TIMEOUT);
-    if(status == RADIOLIB_ERR_NONE) {
-      // the packet was successfully received
+    int16_t st = radio.receive(rx_buf, NUM_BYTES, RX_TIMEOUT);
+    if (st == RADIOLIB_ERR_NONE) {
+      n_ok++;
+      printf("RX #%lu len=%u RSSI=%.1f SNR=%.1f\n", (unsigned long)n_ok,
+             (unsigned)radio.getPacketLength(),
+             (double)radio.getRSSI(), (double)radio.getSNR());
       printf("Received data: ");
       for (int i = 0; i < MSG_LEN; i++) {
         printf("%02X ", rx_buf[i]);
@@ -182,11 +193,16 @@ int main() {
         uint16_t sens_b = (rx_buf[3] << 8) | rx_buf[4];
         uint8_t v_bat = rx_buf[5];
         uint8_t temp = rx_buf[6];
-        uint8_t status = rx_buf[7];
-        printf("Sensor A: %u kiloohms, Sensor B: %u kiloohms\n", sens_a, sens_b);
+        uint8_t cell_status = rx_buf[7];
+        float v_bat_voltage = 5.0f * (v_bat / 255.0f);
+        printf("cell voltage: %.2f V, temp: %d C, status: 0x%02X, Sensor A: %u kohm, Sensor B: %u kohm\n",
+               (double)v_bat_voltage, temp, cell_status, sens_a, sens_b);
       }
-    } else if (status != RADIOLIB_ERR_RX_TIMEOUT) {
-      printf("Failure to Receive, Code: %d\n", status);
+    } else if (st == RADIOLIB_ERR_RX_TIMEOUT) {
+      n_to++;
+    } else {
+      n_err++;
+      printf("receive error %d\n", st);   // -7 = CRC error
     }
   }
   return(0);
@@ -257,13 +273,13 @@ void sensors_init(void) {
 // returns: [MSB->LSB] PPR, CHG, OD, OC, 0, 0, 0, 0
 uint8_t cell_get_status(void){
   uint8_t status = 0;
-  status = (gpio_get(CELL_PPR) >> 7) | (gpio_get(CELL_CHG) >> 6) | 
-            (gpio_get(CELL_OD) >> 5) | (gpio_get(CELL_OD) >> 4);
+  status = (gpio_get(CELL_PPR) << 7) | (gpio_get(CELL_CHG) << 6) | 
+            (gpio_get(CELL_OD) << 5) | (gpio_get(CELL_OC) << 4);
   return status;
 }
 
 uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms){
-  uint16_t raw_sum = 0;
+  uint32_t raw_sum = 0;
   for (int i = 0; i < n; i++){
     adc_select_input(n_adc);
     raw_sum += adc_read();
@@ -274,6 +290,28 @@ uint16_t multi_sample(uint8_t n_adc, uint8_t n, uint16_t rest_ms){
   return avg;
 }
 
+void printIrqStatus(SX1262& radio) {
+    uint32_t irq = radio.getIrqFlags();
+    printf("SX1262 IRQ Status: 0x%04lX [ ", irq);
+
+    if (irq == 0) {
+        printf("NONE ");
+    } else {
+        if (irq & RADIOLIB_SX126X_IRQ_TX_DONE)           printf("TX_DONE ");
+        if (irq & RADIOLIB_SX126X_IRQ_RX_DONE)           printf("RX_DONE ");
+        if (irq & RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED) printf("PREAMBLE_DETECTED ");
+        if (irq & RADIOLIB_SX126X_IRQ_SYNC_WORD_VALID)   printf("SYNC_WORD_VALID ");
+        if (irq & RADIOLIB_SX126X_IRQ_HEADER_VALID)      printf("HEADER_VALID ");
+        if (irq & RADIOLIB_SX126X_IRQ_HEADER_ERR)        printf("HEADER_ERR ");
+        if (irq & RADIOLIB_SX126X_IRQ_CRC_ERR)           printf("CRC_ERR ");
+        if (irq & RADIOLIB_SX126X_IRQ_CAD_DONE)          printf("CAD_DONE ");
+        if (irq & RADIOLIB_SX126X_IRQ_CAD_DETECTED)      printf("CAD_DETECTED ");
+        if (irq & RADIOLIB_SX126X_IRQ_TIMEOUT)           printf("TIMEOUT ");
+        if (irq & RADIOLIB_SX126X_IRQ_LR_FHSS_HOP)       printf("LR_FHSS_HOP ");
+    }
+    printf("]\n");
+}
+
 // Enable and read from the given sensor. Translates the ADC value from raw
 // to resistance (kilo-ohms).
 uint16_t en_read_sensor(int sensor){
@@ -282,12 +320,12 @@ uint16_t en_read_sensor(int sensor){
   if (sensor == SENS_IN_A){
     gpio_put(EN_SENS_A, 1); // Enable sensor
     sleep_ms(SENSOR_TIME); // Allow voltage to settle
-    value = multi_sample(0, 3, SENSOR_TIME);
+    value = multi_sample(0, SENSOR_REPEAT, SENSOR_TIME);
     gpio_put(EN_SENS_A, 0); // Disable sensor
   } else if (sensor == SENS_IN_B){
     gpio_put(EN_SENS_B, 1); // Enable sensor
     sleep_ms(SENSOR_TIME); // Allow voltage to settle
-    value = multi_sample(1, 3, SENSOR_TIME);
+    value = multi_sample(1, SENSOR_REPEAT, SENSOR_TIME);
     gpio_put(EN_SENS_B, 0); // Disable sensor
   }
   // Convert value to resistance (ohms)
@@ -304,21 +342,36 @@ uint16_t en_read_sensor(int sensor){
   return static_cast<uint16_t>(resistance);
 }
 
-// Returns battery voltage value as an 8-bit value relative to 3.3V.
+// Returns battery voltage value as an 8-bit value (0-255 maps to 0-5V).
 // We do three reads and average them first for a better result.
 uint8_t v_bat_read(void){
-  int n = 3; // Number of sample points
-  uint16_t avg = multi_sample(2, n, 30);
-  uint8_t value = ((2 * avg) / pow(2, 12)) * pow(2, 8); // avg x2 because of voltage divider
-  return value;
+  adc_select_input(2);
+  sleep_ms(500);
+  (void)adc_read(); // discard first measurement
+  uint16_t avg = multi_sample(2, 3, 1000);
+  float v_adc  = (avg * 2.89f) / 4095.0f; // Manual vref calibration estimate of 2.89 applied
+  float v_bat  = v_adc * 2.0f;
+  float scaled = (v_bat / 5.0f) * 255.0f;
+  printf("V_BAT: raw: %d, v_adc: %f, v_bat: %f V, scaled: %f (0-255 wrt 0-5V)\n", avg, v_adc, v_bat, scaled);
+  if (scaled < 0.0f)   scaled = 0.0f;
+  if (scaled > 255.0f) scaled = 255.0f;
+  return (uint8_t)lroundf(scaled);
 }
 
 // Return MCU temperature as 8-bit value in degrees Celsius.
 uint8_t temp_read(void){
+  adc_select_input(4);
+  sleep_us(1000);
+  (void)adc_read(); // discard first measurement
   uint16_t raw = multi_sample(4, 3, 100);
-  float voltage = (3.3 / pow(2, 12)) * raw;
+  float voltage = (ADC_VREF / 4095.0f) * raw;
   printf("Raw: %d, Voltage: %f\n", raw, voltage);
-  float temp = 27.0f - (voltage - 0.706f) / 0.001721f;
+  float temp = (27.0f - (voltage - 0.706f) / 0.001721f);
+  if (temp < 0.0f){
+    temp = 0.0f;
+  } else if (temp > 125.0f){
+    temp = 125.0f;
+  }
   uint8_t temp_short = lroundf(temp);
   return temp_short;
 }
@@ -393,7 +446,8 @@ void init_all_hw(SX1262& radio) {
         LORA_CR,
         LORA_SYNC_WORD,
         TX_POWER_DBM,
-        LORA_PREAMBLE_LENGTH
+        LORA_PREAMBLE_LENGTH,
+        TCXO_VOLTAGE
     );
 
     if(state != RADIOLIB_ERR_NONE) {
@@ -418,7 +472,6 @@ void init_all_hw(SX1262& radio) {
   } while(state != RADIOLIB_ERR_NONE);
 
   printf("Radio init success!\n");
-  // == Possibly not needed because of processor directive == 
   // Set DIO2 as RF Switch (internal control of the RF Switch)
   radio.setDio2AsRfSwitch(true);
 }
