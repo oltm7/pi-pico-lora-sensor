@@ -55,7 +55,7 @@ def parse_packet(line):
     data["SNR"] = float(line_items[1])
     data["VBAT"] = float(line_items[2])
     data["TEMP"] = int(line_items[3])
-    data["STATUS"] = line_items[4]
+    data["CHG"] = int(bool((int(line_items[4]) & 0b01000000)))
     data["SENSA"] = float(line_items[5])
     data["SENSB"] = float(line_items[6])
     return data
@@ -168,23 +168,27 @@ def init_graphs():
     return graphs
 
 def update_graphs(data, graphs):
-    # TODO: loop through all items in DATA and update the corresponding graph
-    # = For SENSA =
-    graph = graphs["SENSA"]
-    # update graphs live, takes in a dictionary, x axis is timestamp for all graphs
-    graph[0].append(data["TIMESTAMP"]) # X DATA
-    graph[1].append(data["SENSA"]) # Y DATA
-    
-    # Update existing line
-    graph[2].set_xdata(graph[0])
-    graph[2].set_ydata(graph[1])
+    # loop through all items in DATA and update the corresponding graph
+    for graph_name in graphs.keys():
+        graph = graphs[graph_name]
+        # update graphs live, takes in a dictionary, x axis is timestamp for all graphs
+        if graph_name == "SENSA":
+            graph[0].append(data["TIMESTAMP"]) # X DATA, shared amongst all graphs
+        
+        graph[1].append(data[graph_name]) # Y DATA
+        
+        # Update existing line
+        graph[2].set_xdata(graph[0])
+        graph[2].set_ydata(graph[1])
 
-    # Rescale axes
-    graph[3].relim()
-    graph[3].autoscale_view()
+        # Rescale axes
+        graph[3].relim()
+        graph[3].autoscale_view()
 
-    # Update Matplotlib GUI
-    graph[4].canvas.draw_idle()
+    # Redraw entire figure
+    graphs["SENSA"][4].canvas.draw_idle()
+
+    # Process GUI events
     plt.pause(0.001)
 
 
