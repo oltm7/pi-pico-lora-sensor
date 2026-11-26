@@ -11,7 +11,7 @@
 #include <hal/RPiPico/PicoHal.h>
 
 // Controls whether the Pico only receives (false) or only transmits (true)
-#define I_AM_TRANSMITTER true
+#define I_AM_TRANSMITTER false
 
 // Time between sensor reads (minutes). 0 = send continuously (debugging only).
 // Set back to 5 for deployment.
@@ -49,7 +49,7 @@
   // sync word:                   e.g. 0x34 (public network/LoRaWAN)
 #define LORA_SYNC_WORD 0x34
   // output power:                -5 dBm
-#define TX_POWER_DBM -5 // dBm
+#define TX_POWER_DBM 10 // dBm
   // preamble length:             8 symbols
 #define LORA_PREAMBLE_LENGTH 8 // symbols
 #define TCXO_VOLTAGE 1.8
@@ -175,9 +175,11 @@ int main() {
     int16_t st = radio.receive(rx_buf, NUM_BYTES, RX_TIMEOUT);
     if (st == RADIOLIB_ERR_NONE) {
       n_ok++;
+      double radio_rssi = (double)radio.getRSSI();
+      double radio_snr = (double)radio.getSNR();
       printf("RX #%lu len=%u RSSI=%.1f SNR=%.1f\n", (unsigned long)n_ok,
              (unsigned)radio.getPacketLength(),
-             (double)radio.getRSSI(), (double)radio.getSNR());
+             radio_rssi, radio_snr);
       printf("Received data: ");
       for (int i = 0; i < MSG_LEN; i++) {
         printf("%02X ", rx_buf[i]);
@@ -197,6 +199,9 @@ int main() {
         float v_bat_voltage = 5.0f * (v_bat / 255.0f);
         printf("cell voltage: %.2f V, temp: %d C, status: 0x%02X, Sensor A: %u kohm, Sensor B: %u kohm\n",
                (double)v_bat_voltage, temp, cell_status, sens_a, sens_b);
+        printf("RSSI,SNR,VBAT,TEMP,STATUS,SENSA,SENSB\n");
+        printf("%.1f,%.1f,%.1f,%d,%02X,%u,%u\n", 
+          radio_rssi,radio_snr,(double)v_bat_voltage, temp, cell_status, sens_a, sens_b);
       }
     } else if (st == RADIOLIB_ERR_RX_TIMEOUT) {
       n_to++;
