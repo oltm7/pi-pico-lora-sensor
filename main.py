@@ -55,7 +55,7 @@ def parse_packet(line):
     data["SNR"] = float(line_items[1])
     data["VBAT"] = float(line_items[2])
     data["TEMP"] = int(line_items[3])
-    data["CHG"] = int(bool((int(line_items[4]) & 0b01000000)))
+    data["CHG"] = int(bool(int(line_items[4], 16) & 0x40))
     data["SENSA"] = float(line_items[5])
     data["SENSB"] = float(line_items[6])
     return data
