@@ -62,18 +62,24 @@ def parse_packet(line):
 
 def init_graphs():
     plt.ion()
+    # = For SENSA =
     fig, ax = plt.subplots()
     x_data, y_data = [], []
     line, = ax.plot(x_data, y_data, 'b-o')
     ax.set_xlabel("Time")
+    # Set the format (e.g., "26 Nov 14:00")
+    date_format = mdates.DateFormatter('%d %b %H:%M')
+    ax.xaxis.set_major_formatter(date_format)
+    # Auto-rotate labels so they do not overlap
+    fig.autofmt_xdate()
     ax.set_ylabel("Resistance (kOhms)")
     ax.set_title("Sensor A soil resistance")
-    plt.show(block=False)
-    plt.pause(0.1)
-
+    
     # TODO: data structure needs work lol
     graphs = {}
     graphs["SENSA"] = [x_data, y_data, line, ax, fig]
+    plt.show(block=False)
+    plt.pause(0.1)
     return graphs
 
 def update_graphs(data, graphs):
