@@ -61,23 +61,108 @@ def parse_packet(line):
     return data
 
 def init_graphs():
+    # = General setup =
     plt.ion()
+    fig, ax = plt.subplots(nrows=2, ncols=4, figsize=(14, 6), layout="constrained")
+    ax_flat = ax.flatten()
+    x_time = []
+
     # = For SENSA =
-    fig, ax = plt.subplots()
-    x_data, y_data = [], []
-    line, = ax.plot(x_data, y_data, 'b-o')
-    ax.set_xlabel("Time")
+    y_sensa = []
+    line_sensa, = ax_flat[0].plot(x_time, y_sensa, 'b-o')
+    ax_flat[0].set_xlabel("Time")
     # Set the format (e.g., "26 Nov 14:00")
     date_format = mdates.DateFormatter('%d %b %H:%M')
-    ax.xaxis.set_major_formatter(date_format)
+    ax_flat[0].xaxis.set_major_formatter(date_format)
     # Auto-rotate labels so they do not overlap
     fig.autofmt_xdate()
-    ax.set_ylabel("Resistance (kOhms)")
-    ax.set_title("Sensor A soil resistance")
-    
-    # TODO: data structure needs work lol
+    ax_flat[0].set_ylabel("Resistance (kOhms)")
+    ax_flat[0].set_title("Sensor A soil resistance")
+
+    # = For SENSB = 
+    y_sensb = []
+    line_sensb, = ax_flat[1].plot(x_time, y_sensb, 'b-o')
+    ax_flat[1].set_xlabel("Time")
+    # Set the format (e.g., "26 Nov 14:00")
+    date_format = mdates.DateFormatter('%d %b %H:%M')
+    ax_flat[1].xaxis.set_major_formatter(date_format)
+    # Auto-rotate labels so they do not overlap
+    fig.autofmt_xdate()
+    ax_flat[1].set_ylabel("Resistance (kOhms)")
+    ax_flat[1].set_title("Sensor B soil resistance")
+
+    # = For RSSI = 
+    y_rssi = []
+    line_rssi, = ax_flat[2].plot(x_time, y_rssi, 'g-o')
+    ax_flat[2].set_xlabel("Time")
+    # Set the format (e.g., "26 Nov 14:00")
+    date_format = mdates.DateFormatter('%d %b %H:%M')
+    ax_flat[2].xaxis.set_major_formatter(date_format)
+    # Auto-rotate labels so they do not overlap
+    fig.autofmt_xdate()
+    ax_flat[2].set_ylabel("RSSI (dBm)")
+    ax_flat[2].set_title("Received Signal Strength Indicator (RSSI, dBm)")
+
+    # = For SNR =
+    y_snr = []
+    line_snr, = ax_flat[3].plot(x_time, y_snr, 'g-o')
+    ax_flat[3].set_xlabel("Time")
+    # Set the format (e.g., "26 Nov 14:00")
+    date_format = mdates.DateFormatter('%d %b %H:%M')
+    ax_flat[3].xaxis.set_major_formatter(date_format)
+    # Auto-rotate labels so they do not overlap
+    fig.autofmt_xdate()
+    ax_flat[3].set_ylabel("SNR (dB)")
+    ax_flat[3].set_title("Signal to Noise Ratio (SNR, dB)")
+
+    # = For VBAT = 
+    y_vbat = []
+    line_vbat, = ax_flat[4].plot(x_time, y_vbat, 'r-o')
+    ax_flat[4].set_xlabel("Time")
+    # Set the format (e.g., "26 Nov 14:00")
+    date_format = mdates.DateFormatter('%d %b %H:%M')
+    ax_flat[4].xaxis.set_major_formatter(date_format)
+    # Auto-rotate labels so they do not overlap
+    fig.autofmt_xdate()
+    ax_flat[4].set_ylabel("Voltage (V)")
+    ax_flat[4].set_title("Cell Voltage (V)")
+
+    # = For TEMP = 
+    y_temp = []
+    line_temp, = ax_flat[5].plot(x_time, y_temp, 'r-o')
+    ax_flat[5].set_xlabel("Time")
+    # Set the format (e.g., "26 Nov 14:00")
+    date_format = mdates.DateFormatter('%d %b %H:%M')
+    ax_flat[5].xaxis.set_major_formatter(date_format)
+    # Auto-rotate labels so they do not overlap
+    fig.autofmt_xdate()
+    ax_flat[5].set_ylabel("Temperature (deg C)")
+    ax_flat[5].set_title("Internal Temperature (C)")
+
+    # = For CHG = 
+    y_chg = []
+    line_chg, = ax_flat[6].plot(x_time, y_chg, 'y-o')
+    ax_flat[6].set_xlabel("Time")
+    # Set the format (e.g., "26 Nov 14:00")
+    date_format = mdates.DateFormatter('%d %b %H:%M')
+    ax_flat[6].xaxis.set_major_formatter(date_format)
+    # Auto-rotate labels so they do not overlap
+    fig.autofmt_xdate()
+    ax_flat[6].set_ylabel("Charging Status (Y/N)")
+    ax_flat[6].set_title("Solar Charging Status")
+
+    # Extra plot (disabled)
+    ax_flat[7].axis("off")
+
+    # Graphs data structure
     graphs = {}
-    graphs["SENSA"] = [x_data, y_data, line, ax, fig]
+    graphs["SENSA"] = [x_time, y_sensa, line_sensa, ax_flat[0], fig]
+    graphs["SENSB"] = [x_time, y_sensb, line_sensb, ax_flat[1], fig]
+    graphs["RSSI"] = [x_time, y_rssi, line_rssi, ax_flat[2], fig]
+    graphs["SNR"] = [x_time, y_snr, line_snr, ax_flat[3], fig]
+    graphs["VBAT"] = [x_time, y_vbat, line_vbat, ax_flat[4], fig]
+    graphs["TEMP"] = [x_time, y_temp, line_temp, ax_flat[5], fig]
+    graphs["CHG"] = [x_time, y_chg, line_chg, ax_flat[6], fig]
     plt.show(block=False)
     plt.pause(0.1)
     return graphs
