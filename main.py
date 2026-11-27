@@ -26,6 +26,7 @@ def get_serial_port():
             print("Invalid selection. Try again.")
 
 def monitor_serial(port, graphs, baudrate=115200):
+    expecting_data = False
     try:
         # timeout=1 prevents readline() from blocking forever on exit
         with serial.Serial(port, baudrate, timeout=1) as ser:
@@ -40,14 +41,13 @@ def monitor_serial(port, graphs, baudrate=115200):
                         continue
                     if expecting_data:
                         expecting_data = False
-                        data_line = ser.readline().decode('utf-8', errors='replace').rstrip()
                         try:
-                            update_graphs(parse_packet(data_line), graphs)
-                            print(data_line)
+                            update_graphs(parse_packet(line), graphs)
+                            print(line)
                         except (ValueError, IndexError, KeyError):
                             print("Bad packet, skipping")
                 else:
-                    plt.pause(0.01)
+                    plt.pause(0.05)
     except serial.SerialException as e:
         print(f"\nSerial error: {e}, Retrying in 2 s...")
         time.sleep(2)
@@ -171,7 +171,7 @@ def init_graphs():
     graphs["VBAT"] = [x_time, y_vbat, line_vbat, ax_flat[4], fig]
     graphs["TEMP"] = [x_time, y_temp, line_temp, ax_flat[5], fig]
     graphs["CHG"] = [x_time, y_chg, line_chg, ax_flat[6], fig]
-    plt.show(block=False)
+    plt.show()
     plt.pause(0.1)
     return graphs
 
