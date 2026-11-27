@@ -8,6 +8,8 @@ import matplotlib.dates as mdates
 from datetime import datetime
 import numpy as np
 
+MAX_POINTS = 300
+
 def get_serial_port():
     ports = list(serial.tools.list_ports.comports())
     if not ports:
@@ -28,8 +30,8 @@ def get_serial_port():
 def monitor_serial(port, graphs, baudrate=115200):
     expecting_data = False
     try:
-        # timeout=1 prevents readline() from blocking forever on exit
-        with serial.Serial(port, baudrate, timeout=1) as ser:
+        # timeout=0.1 prevents readline() from blocking forever on exit
+        with serial.Serial(port, baudrate, timeout=0.1) as ser:
             print(f"\nConnected to {port} at {baudrate} baud. Press Ctrl+C to stop.\n")
             while True:
                 if ser.in_waiting > 0:
@@ -177,18 +179,24 @@ def init_graphs():
 
 def update_graphs(data, graphs):
     # loop through all items in DATA and update the corresponding graph
-    graphs["SENSA"][0].append(data["TIMESTAMP"])   # shared x data, once
+    timestamps = graphs["SENSA"][0]
+    timestamps.append(data["TIMESTAMP"])   # shared x data, once
     for graph_name, graph in graphs.items():
         # update graphs live, takes in a dictionary, x axis is timestamp for all graphs
         graph[1].append(data[graph_name]) # Y DATA
         
         # Update existing line
-        graph[2].set_xdata(graph[0])
+        graph[2].set_xdata(timestamps)
         graph[2].set_ydata(graph[1])
 
         # Rescale axes
         graph[3].relim()
         graph[3].autoscale_view()
+
+    if len(timestamps) > MAX_POINTS:
+        timestamps.pop(0)
+        for graph in graphs.values():
+            graph[1].pop(0)
 
     # Redraw entire figure
     graphs["SENSA"][4].canvas.draw_idle()
