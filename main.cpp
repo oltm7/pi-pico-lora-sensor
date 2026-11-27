@@ -11,7 +11,7 @@
 #include <hal/RPiPico/PicoHal.h>
 
 // Controls whether the Pico only receives (false) or only transmits (true)
-#define I_AM_TRANSMITTER true
+#define I_AM_TRANSMITTER false
 
 // Time between sensor reads (minutes). 0 = send continuously (debugging only).
 // Set back to 5 for deployment.

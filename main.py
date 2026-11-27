@@ -1,6 +1,7 @@
 # Monitoring script
 import matplotlib.pyplot as plt
 import sys
+import time
 import serial
 import serial.tools.list_ports
 import matplotlib.dates as mdates
@@ -34,15 +35,22 @@ def monitor_serial(port, graphs, baudrate=115200):
                     # Read line, decode bytes to string, and strip trailing newlines
                     line = ser.readline().decode('utf-8', errors='replace').rstrip()
                     print(line)
-                    if (line[0:5] == "RSSI,"):
+                    if line.startswith("RSSI,"):
+                        expecting_data = True
+                        continue
+                    if expecting_data:
+                        expecting_data = False
                         data_line = ser.readline().decode('utf-8', errors='replace').rstrip()
-                        print(data_line)
-                        data = parse_packet(data_line)
-                        update_graphs(data, graphs)
+                        try:
+                            update_graphs(parse_packet(data_line), graphs)
+                            print(data_line)
+                        except (ValueError, IndexError, KeyError):
+                            print("Bad packet, skipping")
                 else:
                     plt.pause(0.01)
     except serial.SerialException as e:
-        print(f"\nSerial error: {e}")
+        print(f"\nSerial error: {e}, Retrying in 2 s...")
+        time.sleep(2)
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")
 
@@ -169,12 +177,9 @@ def init_graphs():
 
 def update_graphs(data, graphs):
     # loop through all items in DATA and update the corresponding graph
-    for graph_name in graphs.keys():
-        graph = graphs[graph_name]
+    graphs["SENSA"][0].append(data["TIMESTAMP"])   # shared x data, once
+    for graph_name, graph in graphs.items():
         # update graphs live, takes in a dictionary, x axis is timestamp for all graphs
-        if graph_name == "SENSA":
-            graph[0].append(data["TIMESTAMP"]) # X DATA, shared amongst all graphs
-        
         graph[1].append(data[graph_name]) # Y DATA
         
         # Update existing line
@@ -198,3 +203,5 @@ if __name__ == "__main__":
     baud = 115200
     graphs = init_graphs()
     monitor_serial(selected_port, graphs, baud)
+    plt.ioff()
+    plt.show()
